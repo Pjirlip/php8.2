@@ -1,0 +1,49 @@
+# Bereinigung verwaister TYPO3-Form-Uploads (form_*) als Kubernetes CronJob (H2).
+# Nutzt typo3_form_cleanup.sh aus dem Image; das Skript durchsucht nur noch fileadmin/user_upload (maxdepth 2)
+# statt des gesamten DocumentRoot. Einmal täglich, bewusst nicht zur vollen Stunde.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: example-site-typo3-form-cleanup
+spec:
+  schedule: "17 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          containers:
+            - name: cleanup
+              image: ghcr.io/pjirlip/php8.2-apache:production
+              command: ["typo3_form_cleanup.sh"]
+              env:
+                - name: DOCUMENT_ROOT
+                  value: /var/www/html/public
+                - name: CLEANUP_FORM_UPLOAD_DIR
+                  value: fileadmin/user_upload
+                - name: CLEANUP_FORM_KEEP_DAYS
+                  value: "2"
+                - name: CLEANUP_FORM_DRY_RUN
+                  value: "0"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+              volumeMounts:
+                - name: webroot
+                  mountPath: /var/www/html
+          volumes:
+            - name: webroot
+              persistentVolumeClaim:
+                claimName: example-site-webroot

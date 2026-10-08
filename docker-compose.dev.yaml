@@ -1,0 +1,12 @@
+version: "3"
+services:
+  apache:
+    build:
+      context: .
+    image: php8.2-propeller-apache
+    env_file: ./.env.sample
+    ports:
+      - 8080:80
+    restart: always
+    volumes:
+      - ./test/:/var/www/html/

@@ -1,0 +1,56 @@
+# TYPO3 Scheduler als Kubernetes CronJob (ersetzt den cron-Daemon im Webcontainer, H2).
+# Ein Lauf pro Site, nicht pro Replica. Läuft mit demselben Image und derselben Webroot-PVC wie das Web-Deployment.
+# Anpassen: Namen, Image-Tag, PVC, Secret mit DB-Zugang, DOCUMENT_ROOT/workingDir.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: example-site-typo3-scheduler
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1500
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000      # propeller, identisch mit dem Apache-Worker-User
+            runAsGroup: 1000
+          containers:
+            - name: scheduler
+              image: ghcr.io/pjirlip/php8.2-apache:production
+              workingDir: /var/www/html          # Projekt-Root (Composer-Modus), DocumentRoot ist /var/www/html/public
+              command: ["php", "-d", "memory_limit=256M", "vendor/bin/typo3", "scheduler:run"]
+              env:
+                - name: DOCUMENT_ROOT
+                  value: /var/www/html/public
+              envFrom:
+                - secretRef:
+                    name: example-site-env       # DB-Zugang, SMTP_* usw. wie im Web-Deployment
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - name: webroot
+                  mountPath: /var/www/html
+                - name: typo3-cache
+                  mountPath: /var/www/html/var/cache
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: webroot
+              persistentVolumeClaim:
+                claimName: example-site-webroot
+            - name: typo3-cache
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
