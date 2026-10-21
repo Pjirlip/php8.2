@@ -4,21 +4,19 @@ SHELL ["/bin/bash", "-c"]
 
 RUN addgroup --gid 1000 propeller && useradd --system -u 1000 -g propeller propeller 
  
-ENV PROVISION_CONTEXT "production"
-ENV DEBIAN_FRONTEND noninteractive
-ENV TZ Europe/Berlin
-
-ENV APACHE_LOCK_DIR /var/lock/apache2
-ENV APACHE_LOG_DIR /var/log/apache2
-ENV APACHE_PID_FILE /var/run/apache2/apache2.pid
-ENV APACHE_SERVER_NAME localhost
+ENV PROVISION_CONTEXT="production"
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Berlin
+ENV APACHE_LOCK_DIR=/var/lock/apache2
+ENV APACHE_LOG_DIR=/var/log/apache2
+ENV APACHE_PID_FILE=/var/run/apache2/apache2.pid
+ENV APACHE_SERVER_NAME=localhost
 ENV APACHE_RUN_USER=propeller
 ENV APACHE_RUN_GROUP=propeller
 ENV APACHE_RUN_DIR=/var/run/apache2
 ENV DOCUMENT_ROOT=/var/www/html
 ENV LETSENCRYPT_EMAIL=certbot@propeller.de
-ENV PORT 80
-
+ENV PORT=80
 # Apache runtime tuning (K1, K2, H4). An empty APACHE_MAX_REQUEST_WORKERS lets entrypoint.sh derive the
 # value from the container memory limit: floor((limit_MiB - BASELINE_MB) / CHILD_MB)
 ENV APACHE_MAX_REQUEST_WORKERS="" \
@@ -30,14 +28,12 @@ ENV APACHE_MAX_REQUEST_WORKERS="" \
     APACHE_TIMEOUT=120 \
     APACHE_ALLOW_OVERRIDE=All
 
-ENV SMTP_SERVER example.com
+ENV SMTP_SERVER=example.com
 ENV SMTP_PORT=25
-ENV SMTP_FROM mail@example.com
-
-ENV PHP_MEMORY_LIMIT 256M
-ENV PHP_MAX_EXEC_TIME 240
-ENV PHP_POST_AND_UPLOAD_MAX_SIZE 50M
-
+ENV SMTP_FROM=mail@example.com
+ENV PHP_MEMORY_LIMIT=256M
+ENV PHP_MAX_EXEC_TIME=240
+ENV PHP_POST_AND_UPLOAD_MAX_SIZE=50M
 # PHP runtime tuning (K2, H4)
 ENV PHP_OPCACHE_MEMORY=192 \
     PHP_OPCACHE_MAX_FILES=50000 \
@@ -110,10 +106,9 @@ RUN ssh-keyscan -H gitlab.propeller.de >> /etc/ssh/ssh_known_hosts 2>/dev/null |
 
 # Generate and set Locale
 RUN locale-gen
-ENV LC_ALL en_US.UTF-8 
-ENV LANG en_US.UTF-8  
-ENV LANGUAGE en_US:en  
-
+ENV LC_ALL=en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
 # Set Timezone
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 

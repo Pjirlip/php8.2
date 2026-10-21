@@ -65,6 +65,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          # always resolve the FROM tag against the registry so a rebuild picks up the newest base image
+          pull: true
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

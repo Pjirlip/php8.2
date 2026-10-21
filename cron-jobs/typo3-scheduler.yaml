@@ -24,7 +24,7 @@ spec:
             runAsGroup: 1000
           containers:
             - name: scheduler
-              image: ghcr.io/pjirlip/php8.2-apache:production
+              image: ghcr.io/pjirlip/php8.2:latest
               workingDir: /var/www/html          # Projekt-Root (Composer-Modus), DocumentRoot ist /var/www/html/public
               command: ["php", "-d", "memory_limit=256M", "vendor/bin/typo3", "scheduler:run"]
               env:
