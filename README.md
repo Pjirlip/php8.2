@@ -54,7 +54,11 @@ containers:
     image: ghcr.io/pjirlip/php8.2-fpm:latest
     envFrom: [{ secretRef: { name: example-site-env } }]
     resources: { requests: { cpu: 50m, memory: 256Mi }, limits: { memory: 1Gi } }
-    livenessProbe: { tcpSocket: { port: 9000 }, periodSeconds: 10, failureThreshold: 6 }
+    livenessProbe:   # php-fpm listens on 127.0.0.1 only, a tcpSocket probe would use the pod IP
+      exec: { command: ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000"] }
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 6
     lifecycle: { preStop: { exec: { command: ["sh", "-c", "sleep 5"] } } }
     volumeMounts:
       - { name: webroot, mountPath: /var/www/html }
