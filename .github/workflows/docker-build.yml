@@ -1,7 +1,7 @@
 name: Build and publish php-fpm and httpd images
 
 # Branch "fpm": builds two images from this repository and publishes them under their own names
-# (php8.2-fpm, php8.2-httpd) with "latest", "fpm" and sha-<short> tags. The package of the mod_php
+# (php8.2-fpm, php8.2-httpd, the latter also as "httpd") with "latest", "fpm" and sha-<short> tags. The package of the mod_php
 # image (php8.2:latest) is not touched. A manual run publishes the given extra tag.
 on:
   push:
@@ -33,8 +33,11 @@ jobs:
         include:
           - image: php8.2-fpm
             dockerfile: Dockerfile
+            extra_image: ""
           - image: php8.2-httpd
             dockerfile: Dockerfile.httpd
+            # the Apache container has no PHP and serves every PHP version: also published as "httpd"
+            extra_image: ghcr.io/pjirlip/httpd
     concurrency:
       group: docker-build-${{ github.ref }}-${{ matrix.image }}
       cancel-in-progress: true
@@ -57,7 +60,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          images: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+            ${{ matrix.extra_image }}
           tags: |
             type=raw,value=latest
             type=ref,event=branch

@@ -15,7 +15,7 @@ gehen über FastCGI an den php-fpm-Container, dessen Prozesse nur für PHP gebra
 
 | Container | Image | Aufgabe |
 |-----------|-------|---------|
-| `apache` | `ghcr.io/pjirlip/php8.2-httpd` | Port 80, statische Dateien, `.htaccess`, `/healthz`, proxied `*.php` nach `127.0.0.1:9000` |
+| `apache` | `ghcr.io/pjirlip/httpd` (identisch mit `php8.2-httpd`) | Port 80, statische Dateien, `.htaccess`, `/healthz`, proxied `*.php` nach `127.0.0.1:9000` |
 | `php-fpm` | `ghcr.io/pjirlip/php8.2-fpm` | PHP 8.2 mit allen Extensions, Composer, msmtp; auch das Image für CronJobs |
 
 Beide Container mounten die Webroot-PVC unter demselben Pfad (`/var/www/html`), Apache read-only. Sie teilen
