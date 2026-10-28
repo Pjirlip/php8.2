@@ -1,5 +1,71 @@
 # php8.2-apache
 
+> **Branch `fpm`:** dieses Repository baut hier zwei Images statt des mod_php-Images.
+> `ghcr.io/pjirlip/php8.2-fpm` (PHP-FPM, `Dockerfile`) und `ghcr.io/pjirlip/php8.2-httpd` (Apache event +
+> mod_proxy_fcgi, `Dockerfile.httpd`). Beide laufen als zwei Container in einem Pod, siehe Abschnitt
+> "Apache + PHP-FPM". `php8.2:latest` bleibt bis zum Merge unverändert.
+
+## Apache + PHP-FPM
+
+Warum: Mit Apache prefork und mod_php belegt jede Verbindung einen kompletten PHP-Prozess, auch ein
+2-ms-JPEG und auch eine Verbindung, die nur im KeepAlive wartet. Hinter Traefik mit HTTP/2 kommen 20 bis 40
+Asset-Requests parallel an, ein Pod mit wenigen Workern serialisiert sie, und Apache meldet
+`AH00161 server reached MaxRequestWorkers`. Mit event-MPM kostet eine Verbindung einen Thread, PHP-Requests
+gehen über FastCGI an den php-fpm-Container, dessen Prozesse nur für PHP gebraucht werden.
+
+| Container | Image | Aufgabe |
+|-----------|-------|---------|
+| `apache` | `ghcr.io/pjirlip/php8.2-httpd` | Port 80, statische Dateien, `.htaccess`, `/healthz`, proxied `*.php` nach `127.0.0.1:9000` |
+| `php-fpm` | `ghcr.io/pjirlip/php8.2-fpm` | PHP 8.2 mit allen Extensions, Composer, msmtp; auch das Image für CronJobs |
+
+Beide Container mounten die Webroot-PVC unter demselben Pfad (`/var/www/html`), Apache read-only. Sie teilen
+den Netzwerk-Namespace des Pods, php-fpm lauscht nur auf `127.0.0.1:9000`.
+
+Pool-Dimensionierung im php-fpm-Container (`scripts/entrypoint.sh`), analog zur alten Worker-Formel:
+
+    pm.max_children = floor((limit_MiB - PHP_FPM_BASELINE_MEMORY_MB) / PHP_FPM_CHILD_MEMORY_MB)
+
+Defaults 256 MiB Baseline (OPcache 192 MiB + Master) und 64 MiB pro Child: 1Gi ergibt 12 Children, 2Gi 28.
+`PHP_FPM_MAX_CHILDREN` setzt den Wert explizit, `PHP_FPM_PM=ondemand` startet Children erst bei Bedarf
+(`PHP_FPM_PROCESS_IDLE_TIMEOUT`), sinnvoll für Sites mit wenig Traffic. `PHP_FPM_REQUEST_TERMINATE_TIMEOUT`
+(300 s) beendet Requests, die an NFS oder MySQL hängen; `max_execution_time` zählt nur CPU-Zeit.
+
+Apache-Container: `APACHE_MAX_REQUEST_WORKERS` (150) sind Threads, `APACHE_PROXY_TIMEOUT` (300 s) muss den
+längsten PHP-Request überdauern. `/fpm-ping` (Cluster-Netze) und `/fpm-status` (nur Pod-intern) sind die
+php-fpm-Probes, `/server-status` das Apache-Scoreboard, alle vom Access-Log ausgenommen.
+
+Deployment-Skelett:
+
+```yaml
+containers:
+  - name: apache
+    image: ghcr.io/pjirlip/php8.2-httpd:latest
+    ports: [{ containerPort: 80 }]
+    env:
+      - { name: DOCUMENT_ROOT, value: /var/www/html }
+    resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 256Mi } }
+    startupProbe:   { httpGet: { path: /healthz, port: 80 }, periodSeconds: 5, failureThreshold: 24 }
+    readinessProbe: { httpGet: { path: /fpm-ping, port: 80 }, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 2 }
+    livenessProbe:  { httpGet: { path: /healthz, port: 80 }, periodSeconds: 10, timeoutSeconds: 3, failureThreshold: 9 }
+    lifecycle: { preStop: { exec: { command: ["sh", "-c", "sleep 5"] } } }
+    volumeMounts:
+      - { name: webroot, mountPath: /var/www/html, readOnly: true }
+  - name: php-fpm
+    image: ghcr.io/pjirlip/php8.2-fpm:latest
+    envFrom: [{ secretRef: { name: example-site-env } }]
+    resources: { requests: { cpu: 50m, memory: 256Mi }, limits: { memory: 1Gi } }
+    livenessProbe: { tcpSocket: { port: 9000 }, periodSeconds: 10, failureThreshold: 6 }
+    lifecycle: { preStop: { exec: { command: ["sh", "-c", "sleep 5"] } } }
+    volumeMounts:
+      - { name: webroot, mountPath: /var/www/html }
+      - { name: tmp, mountPath: /tmp }
+terminationGracePeriodSeconds: 45
+```
+
+Stolperstein: `php_value`/`php_flag`-Zeilen in `.htaccess` sind mod_php-Direktiven und führen ohne mod_php zu
+einem 500. Vor der Umstellung prüfen (`grep -rlE '^\s*php_(value|flag|admin)' <webroot>`) und die
+Einstellungen nach `.user.ini` oder in die Env-Variablen verschieben.
+
 Dockerimage für Hosting von Seiten mit PHP Version 8.2 (TYPO3 Composer-Projekte, `DOCUMENT_ROOT=/var/www/html/public`).
 
 Inkl. GM und Redis Support

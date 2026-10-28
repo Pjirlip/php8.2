@@ -23,7 +23,7 @@ spec:
             runAsGroup: 1000
           containers:
             - name: cleanup
-              image: ghcr.io/pjirlip/php8.2:latest
+              image: ghcr.io/pjirlip/php8.2-fpm:latest
               command: ["typo3_form_cleanup.sh"]
               env:
                 - name: DOCUMENT_ROOT

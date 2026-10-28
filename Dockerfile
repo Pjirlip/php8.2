@@ -1,32 +1,31 @@
-FROM  php:8.2-apache
+# PHP-FPM container: runs PHP only. Static files, keep-alive connections and TLS termination never
+# occupy a PHP process; Apache (Dockerfile.httpd) proxies .php requests to this container over
+# 127.0.0.1:9000 inside the same pod.
+FROM php:8.2-fpm
 LABEL maintainer="Philipp Dippel <philipp.dippel@propeller.de>"
 SHELL ["/bin/bash", "-c"]
 
-RUN addgroup --gid 1000 propeller && useradd --system -u 1000 -g propeller propeller 
- 
+RUN addgroup --gid 1000 propeller && useradd --system -u 1000 -g propeller propeller
+
 ENV PROVISION_CONTEXT="production"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Europe/Berlin
-ENV APACHE_LOCK_DIR=/var/lock/apache2
-ENV APACHE_LOG_DIR=/var/log/apache2
-ENV APACHE_PID_FILE=/var/run/apache2/apache2.pid
-ENV APACHE_SERVER_NAME=localhost
-ENV APACHE_RUN_USER=propeller
-ENV APACHE_RUN_GROUP=propeller
-ENV APACHE_RUN_DIR=/var/run/apache2
 ENV DOCUMENT_ROOT=/var/www/html
 ENV LETSENCRYPT_EMAIL=certbot@propeller.de
-ENV PORT=80
-# Apache runtime tuning (K1, K2, H4). An empty APACHE_MAX_REQUEST_WORKERS lets entrypoint.sh derive the
-# value from the container memory limit: floor((limit_MiB - BASELINE_MB) / CHILD_MB)
-ENV APACHE_MAX_REQUEST_WORKERS="" \
-    APACHE_CHILD_MEMORY_MB=100 \
-    APACHE_BASELINE_MEMORY_MB=256 \
-    APACHE_MIN_SPARE_SERVERS=2 \
-    APACHE_MAX_SPARE_SERVERS=4 \
-    APACHE_MAX_CONNECTIONS_PER_CHILD=1000 \
-    APACHE_TIMEOUT=120 \
-    APACHE_ALLOW_OVERRIDE=All
+# Pool sizing (K1). An empty PHP_FPM_MAX_CHILDREN lets entrypoint.sh derive the value from the container
+# memory limit: floor((limit_MiB - BASELINE_MB) / CHILD_MB). Only PHP requests occupy a child.
+ENV PHP_FPM_LISTEN=127.0.0.1:9000 \
+    PHP_FPM_PM=dynamic \
+    PHP_FPM_MAX_CHILDREN="" \
+    PHP_FPM_CHILD_MEMORY_MB=64 \
+    PHP_FPM_BASELINE_MEMORY_MB=256 \
+    PHP_FPM_START_SERVERS=2 \
+    PHP_FPM_MIN_SPARE_SERVERS=1 \
+    PHP_FPM_MAX_SPARE_SERVERS=4 \
+    PHP_FPM_PROCESS_IDLE_TIMEOUT=10s \
+    PHP_FPM_MAX_REQUESTS=1000 \
+    PHP_FPM_REQUEST_TERMINATE_TIMEOUT=300 \
+    PHP_FPM_SLOWLOG_TIMEOUT=0
 
 ENV SMTP_SERVER=example.com
 ENV SMTP_PORT=25
@@ -44,13 +43,13 @@ ENV PHP_OPCACHE_MEMORY=192 \
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 COPY ./config/php.ini /usr/local/etc/php/conf.d/zz-propeller.ini
-COPY ./config/000-default.conf /etc/apache2/sites-available/000-default.conf
-COPY ./config/apache2.conf /etc/apache2/apache2.conf
-COPY ./config/mpm_prefork.conf /etc/apache2/mods-available/mpm_prefork.conf
+COPY ./config/php-fpm.conf /usr/local/etc/php-fpm.conf
 COPY ./config/locale.gen /etc/locale.gen
-
-COPY ./scripts/*.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/*.sh
+COPY ./scripts/entrypoint.sh ./scripts/typo3_form_cleanup.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/typo3_form_cleanup.sh && \
+    # the base image's pool files (www.conf, docker.conf, zz-docker.conf) are replaced by the pool
+    # entrypoint.sh writes at startup
+    rm -f /usr/local/etc/php-fpm.d/*.conf
 
 RUN mkdir -p /home/propeller/.composer/cache && chown -R propeller:propeller /home/propeller/ && chmod -R 0750 /home/propeller/
 
@@ -66,7 +65,6 @@ RUN apt-get update && \
         libicu-dev\
         libzip-dev \
         libxslt-dev \
-        libmcrypt-dev \
         libonig-dev \
         libldap2-dev \
         wget \
@@ -87,8 +85,7 @@ RUN apt-get update && \
         mailutils && \
     docker-php-ext-configure gd --with-freetype --with-jpeg && \
     docker-php-ext-install -j$(nproc) pdo_mysql sysvmsg sysvsem mysqli soap gd zip opcache intl curl bcmath sockets xsl ldap && \
-    a2enmod rewrite deflate headers mime expires filter setenvif env authz_core auth_basic alias && \
-    echo "export PATH=":$PATH"" && \
+    pecl install redis && docker-php-ext-enable redis && \
     apt-get clean && \
     apt-get -y purge \
         libxml2-dev libfreetype6-dev \
@@ -96,34 +93,30 @@ RUN apt-get update && \
         libmcrypt-dev \
         libpng-dev \
         zlib1g-dev && \
-    rm -rf /var/lib/apt/lists/* /usr/src/*
-
-RUN pecl install redis  && rm -rf /tmp/pear && docker-php-ext-enable redis
+    rm -rf /var/lib/apt/lists/* /usr/src/* /tmp/pear
 
 # Add propeller Gitlab to known hosts for composer (skipped if hosts are unreachable, e.g. on public CI)
-RUN ssh-keyscan -H gitlab.propeller.de >> /etc/ssh/ssh_known_hosts 2>/dev/null || true && \
-    ssh-keyscan -H atum.propeller.de >> /etc/ssh/ssh_known_hosts 2>/dev/null || true
+RUN (ssh-keyscan -T 5 -H gitlab.propeller.de atum.propeller.de >> /etc/ssh/ssh_known_hosts || true)
 
-# Generate and set Locale
-RUN locale-gen
+# Generate and set Locale; verified because locale-gen silently skips a last line without newline
+RUN locale-gen && locale -a | grep -qi "^en_US.utf8$"
 ENV LC_ALL=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 # Set Timezone
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# Logs go straight to the container streams (see apache2.conf). The Debian default would log every
-# request a second time into other_vhosts_access.log (H5)
-RUN rm -f /etc/apache2/conf-enabled/other-vhosts-access-log.conf
-
-# Static health endpoint for Kubernetes probes (H3) and drop-in directory for per-site Apache rules (K2)
-RUN mkdir -p /opt/propeller/healthz /etc/apache2/site.d && echo ok > /opt/propeller/healthz/index.html
-
 RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
-# Validate the complete configuration at build time without starting a daemon (H6)
-RUN APACHE_MAX_REQUEST_WORKERS=8 apache2ctl -t
+# Validate pool generation and the complete FPM configuration at build time (H6); every extension has to load
+RUN PHP_FPM_MAX_CHILDREN=4 entrypoint.sh php-fpm -t && \
+    for ext in bcmath curl gd intl ldap mysqli pdo_mysql redis soap sockets xsl zip; do php -m | grep -qix "$ext" || { echo "extension $ext failed to load"; exit 1; }; done && \
+    php --ini | grep -q zz-propeller.ini
 
-EXPOSE $PORT
+EXPOSE 9000
+
+# SIGQUIT is php-fpm's graceful stop; Kubernetes sends it on pod termination (bounded by process_control_timeout)
+STOPSIGNAL SIGQUIT
 
 ENTRYPOINT ["entrypoint.sh"]
+CMD ["php-fpm"]

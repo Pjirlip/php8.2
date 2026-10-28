@@ -1,12 +1,22 @@
-version: "3"
+# Local test of the two-container layout: php-fpm owns the network namespace (like a pod), the Apache
+# container joins it, so Apache reaches php-fpm on 127.0.0.1:9000 and port 8080 is published on php-fpm.
 services:
-  apache:
+  php-fpm:
     build:
       context: .
-    image: php8.2-propeller-apache
+    image: php8.2-propeller-fpm
     env_file: ./.env.sample
     ports:
       - 8080:80
-    restart: always
     volumes:
       - ./test/:/var/www/html/
+  apache:
+    build:
+      context: .
+      dockerfile: Dockerfile.httpd
+    image: php8.2-propeller-httpd
+    network_mode: "service:php-fpm"
+    depends_on:
+      - php-fpm
+    volumes:
+      - ./test/:/var/www/html/:ro
