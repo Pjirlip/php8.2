@@ -34,6 +34,11 @@ Apache-Container: `APACHE_MAX_REQUEST_WORKERS` (150) sind Threads, `APACHE_PROXY
 längsten PHP-Request überdauern. `/fpm-ping` (Cluster-Netze) und `/fpm-status` (nur Pod-intern) sind die
 php-fpm-Probes, `/server-status` das Apache-Scoreboard, alle vom Access-Log ausgenommen.
 
+Docker Compose (Server ohne Kubernetes): beide Container laufen als eigene Services, Apache erreicht php-fpm über
+den Service-Namen. Dafür `PHP_FPM_HOST=php-fpm` im Apache-Container sowie `PHP_FPM_LISTEN=0.0.0.0:9000` und ein
+leeres `PHP_FPM_ALLOWED_CLIENTS` im php-fpm-Container (Default `127.0.0.1`, passend zum Pod); Port 9000 nur in
+einem internen Compose-Netz lassen, nicht veröffentlichen. Ohne Memory-Limit (`mem_limit`) gilt `pm.max_children=10`.
+
 Deployment-Skelett:
 
 ```yaml
