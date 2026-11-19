@@ -29,7 +29,10 @@ ENV APACHE_TIMEOUT=120 \
     PHP_FPM_HOST=127.0.0.1 \
     PHP_FPM_PORT=9000
 
-RUN apt-get update && \
+# Bump APT_REFRESH to rebuild the package layer. The build cache otherwise keeps the Apache of an earlier build
+# even after Debian has published a security update (2026-11-19: 2.4.71 for CVE-2026-119618 in mod_http2).
+ARG APT_REFRESH=2026-11-19
+RUN echo "package layer as of ${APT_REFRESH}" && apt-get update && \
     apt-get install -y --no-install-recommends apache2 ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
 
@@ -53,8 +56,9 @@ RUN chmod +x /usr/local/bin/httpd-entrypoint.sh && \
     mkdir -p /opt/propeller/healthz /etc/apache2/site.d && echo ok > /opt/propeller/healthz/index.html && \
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# Validate the complete configuration at build time without starting a daemon (H6)
-RUN apache2ctl -t
+# Validate the complete configuration at build time without starting a daemon (H6); the version ends up in the
+# build log
+RUN apache2ctl -t && apache2 -v
 
 EXPOSE $PORT
 
